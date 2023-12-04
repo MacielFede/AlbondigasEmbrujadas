@@ -1,0 +1,82 @@
+Semáforos: 
+	semPlatosPreparados // Protege la variable de platos preparados en el correr del dia (comienza en 1)
+  semMesada // Protege la mesada de forma global (comienza en 1)
+  semMesadaMozo // Protege la mesada entre mozos (comienza en 1)
+  semHeladera // Protege la heladera entre mozos (comienza en 1)
+  semDespertarRepostero // Genera interacción entre el mozo en la heladera y el repostero (comienza en 0)
+-----------------------------------------------------------------------------------
+Memoria compartida:
+  platosPreparadosEnElDia // Lleva la cuenta de los platos preparados en el dia (comienza en 0)
+  flanesEnHeladera // Lleva la cuenta de los flanes en la heladera (comienza en 25)
+  platosEnMesada // Lleva la cuenta de los platos de albóndigas en la mesada (comienza en 0)
+-----------------------------------------------------------------------------------
+Procedure Mozo:
+	bool terminaElTurno = false, cocinaAbierta = true;
+	while(!terminaElTurno)
+		int comidaElegida = generarPedido()
+		int cantidad = generarCantidadDePedido(comidaElegida)
+
+		if (comidaElegida == 1) // Eligieron flanes
+			sem_wait(semHeladera)
+			if(cantidad <= flanesEnHeladera) // Puedo retirar todos los flanes de la heladera
+				saco_flanes(cantidad)
+				entrego_flanes(cantidad)
+			else
+				saco_flanes(flanesEnHeladera)
+				cantidad = cantidad - flanesEnHeladera
+				sem_post(semDespertarRepostero)
+				sem_wait(semDespertarRepostero)
+				saco_flanes(cantidad)
+				entrego_flanes()
+				sem_post(semHeladera)
+    
+		else // Eligieron albóndigas
+			sem_wait(semMesadaMozo)
+			sem_wait(semMesada)
+			sem_wait(semPlatosPreparados)
+			platosRestantesDelDia = 180 - platosPreparadosEnElDia + platosEnMesada 
+			sem_post(semPlatosPreparados)
+			if (cantidad <= platosRestantesDelDia) // Me fijo si puedo entregar todos los platos o menos
+				int cantidadOriginal
+				while (cantidad > 0)
+					if (platosEnMesada < cantidad) // No me alcanzan los platos de la mesada
+						retirar_platos_mesada(platosEnMesada)
+						cantidad = cantidad - platosEnMesada
+						sem_post(semMesada)
+						esperar_albondigas()
+						sem_wait(semMesada)
+					else // Me alcanzan los platos de la mesada para entregar el pedido
+						retiro_platos_mesada(cantidad)
+
+				entregar_albondigas(cantidadOriginal)
+				if (platosRestantesPorEntregar - pedidoCantidad <= 0) // Me fijo si quedan platos por entregar o si ya terminamos
+					terminaTurno = true;
+
+			else // No puedo entregar el pedido por faltantes
+				avisar_al_cliente("No podemos entregarle su pedido.")
+
+			sem_post(semMesada)
+			sem_post(semMesadaMozo)
+	end while
+end procedure
+—-----------------------------------------------------------------------------------
+Procedure Repostero:
+  while(true)
+		sem_wait(semDespertarRepostero)
+		llenar_heladera()
+		sem_post(semDespertarRepostero)
+	end while
+end procedure
+------------------------------------------------------------------------------------
+Procedure Cocinero(int identidad):
+  bool terminaElTurno = false;
+	while(!terminaElTurno)
+    sem_wait(platosPreparados)
+    terminaElTurno = platosPreparadosEnElDia < 180
+    sem_wait(semMesada)
+    if(terminaElTurno && platosEnMesada < 27) // Si la mesada no esta llena y no llegamos al objetivo de platos
+      cocinar_plato()
+      dejar_plato_en_mesada()
+    sem_post(semMesada)
+    sem_post(platosPreparados)
+end procedure
