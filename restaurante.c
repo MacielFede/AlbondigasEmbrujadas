@@ -2,6 +2,7 @@
 
 void abrirRestaurante(MemoriaCompartida* sd)
 {
+    sd->procesoIntentoInicializar = 1;
     sd->platosPreparadosEnElDia = 0;
     sd->flanesEnHeladera = 25;
     sd->platosEnMesada = 0;

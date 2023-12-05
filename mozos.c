@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <semaphore.h>
 #include "restaurante.h"
 
@@ -19,7 +20,7 @@ int main()
 
     // Crea o abre el objeto de memoria compartida
     int fileDescriptor = shm_open("/fileDescriptor", O_RDWR | O_CREAT, 0666);
-    if (fileDescriptor == -1 && !errno == EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
+    if (fileDescriptor == -1 && errno != EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
     {
         perror("shm_open");
     }
@@ -40,8 +41,8 @@ int main()
     sem_t* semIniciarMemoria = sem_open("/semIniciarMemoria", O_CREAT | O_EXCL, 0666, 1);
 
     if (semIniciarMemoria != SEM_FAILED) {
+        printf("Abriendo el local.\n");
         limpiarSemaforos();
-        sem_unlink("/semIniciarMemoria");
         abrirRestaurante(memComp);
     }
     else {
@@ -49,6 +50,11 @@ int main()
             printf("Esperando que abra el local.\n");
             sleep(2);
         }
+        memComp->procesoIntentoInicializar++;
+        if (memComp->procesoIntentoInicializar >= 3) {
+            sem_unlink("/semIniciarMemoria");
+        }
+        printf("Iniciando la jornada.\n");
     }
 
     // Creación de semáforos
@@ -64,15 +70,16 @@ int main()
     sem_t* semDespertarRepostero = sem_open("/semDespertarRepostero", O_CREAT, 0666, 0);
 
     int pid = fork();
+    int hijoid;
     if (pid == 0)
     {
         strcpy(nombre, "Mozo Martin");
-        pid = fork();
-        if (pid > 0)
+        hijoid = fork();
+        if (hijoid > 0)
         {
             strcpy(nombre, "Mozo Manuel");
         }
-        if (pid < 0)
+        if (hijoid < 0)
         {
             perror("Error en el fork.\n");
             exit(-1);
@@ -81,22 +88,22 @@ int main()
     else if (pid > 0)
     {
         strcpy(nombre, "Moza Margarita");
-        pid = fork();
-        if (pid > 0)
+        hijoid = fork();
+        if (hijoid > 0)
         {
             strcpy(nombre, "Moza Mayra");
-            pid = fork();
-            if (pid > 0)
+            hijoid = fork();
+            if (hijoid > 0)
             {
                 strcpy(nombre, "Mozo Michael");
             }
-            if (pid < 0)
+            if (hijoid < 0)
             {
                 perror("Error en el fork.\n");
                 exit(-1);
             }
         }
-        if (pid < 0)
+        if (hijoid < 0)
         {
             perror("Error en el fork.\n");
             exit(-1);
@@ -110,7 +117,7 @@ int main()
 
     do
     {
-        sleep(ESPERANDO_PEDIDO);
+        sleep(5);
         generarPedido(&pedidoComida, &pedidoCantidad);
         cantidadAux = pedidoCantidad;
 
@@ -127,14 +134,14 @@ int main()
             {
                 pedidoCantidad -= memComp->flanesEnHeladera;
                 memComp->flanesEnHeladera = 0;
-                printf("%s: Me quede sin flanes, despierto a Roberto\n", nombre, pedidoCantidad);
+                printf("%s: Me quede sin flanes, despierto a Roberto\n", nombre);
                 // Despierto al repostero para que haga los flanes y espero que me avise que termino
                 sem_post(semDespertarRepostero);
-                sleep(LLENANDO_HELADERA);
+                sleep(5);
                 sem_wait(semDespertarRepostero);
 
                 memComp->flanesEnHeladera -= pedidoCantidad;
-                printf("%s: Se entregó el pedido de %d flan/es\n", nombre, pedidoCantidad);
+                printf("%s: Se entregó el pedido de %d flanes\n", nombre, cantidadAux);
             }
             printf("%s: Quedan %d flan/es en la heladera\n", nombre, memComp->flanesEnHeladera);
             sem_post(semHeladera);
@@ -157,8 +164,8 @@ int main()
                         pedidoCantidad -= memComp->platosEnMesada;
                         memComp->platosEnMesada = 0;
                         // Les doy tiempo a los cocineros a cocinar mas platos
-                        sem_post(semMesada)
-                            sleep(TIEMPO_DE_COCCION);
+                        sem_post(semMesada);
+                        sleep(TIEMPO_DE_COCCION);
                         sem_wait(semMesada);
                     }
                     else // Me alcanzan los platos de la mesada para entregar el pedido
@@ -168,23 +175,19 @@ int main()
                     }
                 }
                 printf("%s: Se entregaron %d albóndigas\n", nombre, cantidadAux);
-                if (platosRestantesPorEntregar - pedidoCantidad <= 0) // Me fijo si quedan platos por entregar o si ya terminamos
-                    terminaTurno = true;
-                else
-                    printf("%s: Quedan %d platos de albóndigas en la mesada.\n", nombre, memComp->platosEnMesada);
+                printf("%s: Quedan %d platos de albóndigas en la mesada.\n", nombre, memComp->platosEnMesada);
             }
             else // No puedo entregar todo el pedido
             {
                 printf("%s: Se recibió pedido de %d albóndigas, pero no se pudo entregar porque faltan platos en la mesada.\n", nombre, cantidadAux);
             }
+            if (platosRestantesPorEntregar - cantidadAux <= 0) // Me fijo si quedan platos por entregar o si ya terminamos
+                terminaTurno = true;
             sem_post(semMesada);
             sem_post(semMesadaMozo);
         }
     } while (!terminaTurno);
     printf("%s: Cierra el local, ta' manana.\n", nombre);
-
-    // Desprendo la memoria compartida
-    munmap(memComp, sizeof(MemoriaCompartida));
 
     return 0;
 }

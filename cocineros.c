@@ -3,11 +3,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <semaphore.h>
+#include <string.h>
+#include <sys/wait.h>
 #include "restaurante.h"
 
 
@@ -17,7 +19,7 @@ int main()
     bool cocinerosDespiertos = true;
     // Crea o abre el objeto de memoria compartida
     int fileDescriptor = shm_open("/fileDescriptor", O_RDWR | O_CREAT, 0666);
-    if (fileDescriptor == -1 && !errno == EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
+    if (fileDescriptor == -1 && errno != EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
     {
         perror("shm_open");
     }
@@ -38,8 +40,8 @@ int main()
     sem_t* semIniciarMemoria = sem_open("/semIniciarMemoria", O_CREAT | O_EXCL, 0666, 1);
 
     if (semIniciarMemoria != SEM_FAILED) {
+        printf("Abriendo el local.\n");
         limpiarSemaforos();
-        sem_unlink("/semIniciarMemoria");
         abrirRestaurante(memComp);
     }
     else {
@@ -47,6 +49,11 @@ int main()
             printf("Esperando que abra el local.\n");
             sleep(2);
         }
+        memComp->procesoIntentoInicializar++;
+        if (memComp->procesoIntentoInicializar >= 3) {
+            sem_unlink("/semIniciarMemoria");
+        }
+        printf("Iniciando la jornada.\n");
     }
 
     // Crear semáforos
@@ -56,15 +63,16 @@ int main()
     sem_t* semMesada = sem_open("/semMesada", O_CREAT, 0666, 1);
 
     int pid = fork();
+    int hijoid;
     if (pid == 0)
     {
         strcpy(nombre, "Cocinero Carlos");
-        pid = fork();
-        if (pid > 0)
+        hijoid = fork();
+        if (hijoid > 0)
         {
             strcpy(nombre, "Cocinero Ciro");
         }
-        if (pid < 0)
+        if (hijoid < 0)
         {
             perror("Error en el fork.\n");
             exit(-1);
@@ -83,24 +91,20 @@ int main()
 
     do
     {
-        sem_wait(semPlatosPreparados); // Tengo que quedarme con este semáforo hasta que termine
+        sleep(TIEMPO_DE_COCCION);
+        sem_wait(semPlatosPreparados);
         cocinerosDespiertos = memComp->platosPreparadosEnElDia < MAX_PLATOS_X_DIA;
         sem_wait(semMesada);
         if (cocinerosDespiertos && memComp->platosEnMesada < 27) // Si no terminamos el dia y la mesada no esta completa
         {
             // Antes de cocinar otro plato no necesito chequear si alguien mas cocino otro plato porque al quedarme con el semáforo bloqueo a los demás cocineros
             printf("%s: Hay %d platos en la mesada, se cocina uno más.\n", nombre, memComp->platosEnMesada);
-            sleep(TIEMPO_DE_COCCION);
             memComp->platosEnMesada++;
             memComp->platosPreparadosEnElDia++;
         }
         sem_post(semMesada);
         sem_post(semPlatosPreparados);
     } while (cocinerosDespiertos);
-    printf("%s: Se cerró la cocina. Se prepararon: %d platos.\n", nombre, memComp->platosPreparadosEnElDia);
-
-    // Desprendo la memoria compartida
-    munmap(memComp, sizeof(MemoriaCompartida));
 
     return 0;
 }

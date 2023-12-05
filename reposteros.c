@@ -8,13 +8,14 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <semaphore.h>
+#include <errno.h>
 #include "restaurante.h"
 
 int main()
 {
     // Crea o abre el objeto de memoria compartida
     int fileDescriptor = shm_open("/fileDescriptor", O_RDWR | O_CREAT, 0666);
-    if (fileDescriptor == -1 && !errno == EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
+    if (fileDescriptor == -1 && errno != EEXIST) // Me fijo si hubo algún error, si ya existía el objeto dejo pasar
     {
         perror("shm_open");
     }
@@ -35,8 +36,8 @@ int main()
     sem_t* semIniciarMemoria = sem_open("/semIniciarMemoria", O_CREAT | O_EXCL, 0666, 1);
 
     if (semIniciarMemoria != SEM_FAILED) {
+        printf("Abriendo el local.\n");
         limpiarSemaforos();
-        sem_unlink("/semIniciarMemoria");
         abrirRestaurante(memComp);
     }
     else {
@@ -44,6 +45,11 @@ int main()
             printf("Esperando que abra el local.\n");
             sleep(2);
         }
+        memComp->procesoIntentoInicializar++;
+        if (memComp->procesoIntentoInicializar >= 3) {
+            sem_unlink("/semIniciarMemoria");
+        }
+        printf("Iniciando la jornada.\n");
     }
 
     // Creación de semáforos
@@ -52,20 +58,17 @@ int main()
 
     do
     {
-        printf("Roberto repostero: Esperando que se vacié la heladera.\n\n");
+        printf("Roberto repostero: Esperando que se vacié la heladera.\n");
         // Espero que un mozo me llame para llenar la heladera
         sem_wait(semDespertarRepostero);
         // Lleno la heladera
-        printf("Roberto repostero: Estoy llenando la heladera de flanes.\n\n");
-        sleep(LLENANDO_HELADERA);
+        printf("Roberto repostero: Estoy llenando la heladera de flanes.\n");
         memComp->flanesEnHeladera = 25;
         // Libero al mozo que me despertó
         printf("Roberto repostero: Llene la heladera de flanes.\n\n");
         sem_post(semDespertarRepostero);
+        sleep(5);
     } while (true);
-
-    // Desprendo la memoria compartida
-    munmap(memComp, sizeof(MemoriaCompartida));
 
     return 0;
 }
